@@ -156,11 +156,28 @@ with st.sidebar:
     pct_str = st.text_input("Comma-separated percentiles (0-100)", value=default_pct)
 
 # Add title and caption after sidebar inputs are defined
-st.title("📈 GHHF vs DHHF – Monte Carlo Simulator")
-if show_real_values:
-    st.caption(f"Compare real (inflation-adjusted) terminal values via Monte Carlo. Inflation rate: {inflation_rate*100:.1f}% p.a.")
-else:
-    st.caption("Compare nominal terminal values via Monte Carlo with stacked histograms and percentile bars.")
+col_title, col_button = st.columns([3, 1])
+with col_title:
+    st.title("📈 GHHF vs DHHF – Monte Carlo Simulator")
+    if show_real_values:
+        st.caption(f"Compare real (inflation-adjusted) terminal values via Monte Carlo. Inflation rate: {inflation_rate*100:.1f}% p.a.")
+    else:
+        st.caption("Compare nominal terminal values via Monte Carlo with stacked histograms and percentile bars.")
+
+with col_button:
+    st.write("")  # Add some spacing to align with title
+    st.write("")  # Add more spacing
+    update_button = st.button("🚀 Update Simulation", type="primary", use_container_width=True)
+    
+    # Show success message in the same column when simulation completes
+    if 'simulation_success' in st.session_state and st.session_state.simulation_success:
+        st.success("✅ Simulation completed successfully!")
+        # Reset the flag after showing the message
+        st.session_state.simulation_success = False
+    
+    # Show initial message when no simulation has been run yet
+    if 'ghhf_final' not in st.session_state or st.session_state.ghhf_final is None:
+        st.info("🚀 Click the 'Update Simulation' button above to run your first simulation!")
 
 # Parse percentiles
 try:
@@ -180,310 +197,336 @@ else:
     params_ghhf = {"mu": ghhf_mu, "sigma": ghhf_sig, "fee": ghhf_fee}
     params_dhhf = {"mu": dhhf_mu, "sigma": dhhf_sig, "fee": dhhf_fee}
 
-# Run simulation
-with st.spinner("Running simulations…"):
-    ghhf_final, dhhf_final = run_dual_sim(
-        params_ghhf, params_dhhf, years, sims, start_value, monthly_contrib, seed
-    )
+# Initialize session state for storing simulation results
+if 'ghhf_final' not in st.session_state:
+    st.session_state.ghhf_final = None
+    st.session_state.dhhf_final = None
+    st.session_state.simulation_success = False
 
-# -----------------------------
-# Results
-# -----------------------------
-if show_real_values:
-    st.info(f"💰 **Real Values Displayed**: All results are inflation-adjusted using {inflation_rate*100:.1f}% annual inflation rate. Values shown represent purchasing power in today's dollars.")
-
-# Break-even percentile KPI
-st.subheader("Break-even Analysis")
-
-# Find break-even percentile (where GHHF = DHHF)
-break_even_found = False
-break_even_pct = None
-
-# Check if GHHF ever catches up to DHHF
-if np.percentile(ghhf_final, 99) > np.percentile(dhhf_final, 99):
-    # GHHF outperforms at high percentiles, find break-even
-    for p in range(1, 100):
-        if np.percentile(ghhf_final, p) >= np.percentile(dhhf_final, p):
-            break_even_pct = p
-            break_even_found = True
-            break
-
-if break_even_found:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(
-            "Break-even Percentile",
-            f"{break_even_pct}th",
-            help="GHHF starts outperforming DHHF from this percentile onwards"
+# Run simulation only when button is clicked
+if update_button:
+    with st.spinner("Running simulations…"):
+        ghhf_final, dhhf_final = run_dual_sim(
+            params_ghhf, params_dhhf, years, sims, start_value, monthly_contrib, seed
         )
-    with col2:
-        ghhf_break_even = np.percentile(ghhf_final, break_even_pct)
-        dhhf_break_even = np.percentile(dhhf_final, break_even_pct)
-        st.metric(
-            "Break-even Value",
-            format_currency_compact(ghhf_break_even),
-            help=f"Portfolio value at {break_even_pct}th percentile"
-        )
-    with col3:
-        prob_outperform = 100 - break_even_pct
-        st.metric(
-            "Probability GHHF > DHHF",
-            f"{prob_outperform}%",
-            help=f"Chance that GHHF outperforms DHHF"
-        )
+    
+    # Store results in session state
+    st.session_state.ghhf_final = ghhf_final
+    st.session_state.dhhf_final = dhhf_final
+    
+    # Set success flag
+    st.session_state.simulation_success = True
+    
+    # Rerun to show the success message
+    st.rerun()
 else:
-    st.warning("GHHF does not outperform DHHF at any percentile in this simulation")
+    # Use stored results from session state
+    ghhf_final = st.session_state.ghhf_final
+    dhhf_final = st.session_state.dhhf_final
 
-# Ensure break-even percentile is included in the percentiles list if found
-if break_even_found and break_even_pct not in percentiles:
-    percentiles.append(break_even_pct)
-    percentiles.sort()  # Keep percentiles in ascending order
+# Only show results if we have simulation data
+if ghhf_final is not None and dhhf_final is not None:
+    # -----------------------------
+    # Results
+    # -----------------------------
+    if show_real_values:
+        st.info(f"💰 **Real Values Displayed**: All results are inflation-adjusted using {inflation_rate*100:.1f}% annual inflation rate. Values shown represent purchasing power in today's dollars.")
 
-#st.subheader("Percentile comparison (grouped bars)")
-# Grouped bars at selected percentiles
-vals_ghhf = [np.percentile(ghhf_final, p) for p in percentiles]
-vals_dhhf = [np.percentile(dhhf_final, p) for p in percentiles]
+    # Break-even percentile KPI
+    st.subheader("Break-even Analysis")
 
-# Calculate percentage differences for tooltips
-pct_diffs = [round(((ghhf_val - dhhf_val) / dhhf_val * 100), 1) for ghhf_val, dhhf_val in zip(vals_ghhf, vals_dhhf)]
+    # Find break-even percentile (where GHHF = DHHF)
+    break_even_found = False
+    break_even_pct = None
 
-# Create Plotly bar chart
-fig2 = go.Figure()
+    # Check if GHHF ever catches up to DHHF
+    if np.percentile(ghhf_final, 99) > np.percentile(dhhf_final, 99):
+        # GHHF outperforms at high percentiles, find break-even
+        for p in range(1, 100):
+            if np.percentile(ghhf_final, p) >= np.percentile(dhhf_final, p):
+                break_even_pct = p
+                break_even_found = True
+                break
 
-# Add GHHF bars
-fig2.add_trace(go.Bar(
-    x=[f"{p}th" for p in percentiles],
-    y=vals_ghhf,
-    name="GHHF",
-    marker_color='#2E86AB',
-    hovertemplate="<b>GHHF</b><br>" +
-                 "Percentile: %{x}<br>" +
-                 "Value: %{customdata[0]}<br>" +
-                 "vs DHHF: %{customdata[1]:+.0f}%<br>" +
-                 "<extra></extra>",
-    customdata=[[format_currency_compact(y), pct] for y, pct in zip(vals_ghhf, pct_diffs)]
-))
-
-# Add DHHF bars
-fig2.add_trace(go.Bar(
-    x=[f"{p}th" for p in percentiles],
-    y=vals_dhhf,
-    name="DHHF",
-    marker_color='#A23B72',
-    hovertemplate="<b>DHHF</b><br>" +
-                 "Percentile: %{x}<br>" +
-                 "Value: %{customdata[0]}<br>" +
-                 "vs GHHF: %{customdata[1]:+.0f}%<br>" +
-                 "<extra></extra>",
-    customdata=[[format_currency_compact(y), -pct] for y, pct in zip(vals_dhhf, pct_diffs)]
-))
-
-# Add ThinkCell-style percentage increase annotations
-for i, (p, ghhf_val, dhhf_val, pct_diff) in enumerate(zip(percentiles, vals_ghhf, vals_dhhf, pct_diffs)):
-    # Calculate position for annotation (above the higher bar)
-    max_val = max(ghhf_val, dhhf_val)
-    y_pos = max_val + (max_val * 0.08)  # 8% above the higher bar for more spacing
-    
-    # Determine color based on whether GHHF outperforms DHHF
-    if pct_diff > 0:
-        color = '#2E86AB'  # GHHF blue when outperforming
-        symbol = "▲"
-    elif pct_diff < 0:
-        color = '#A23B72'  # DHHF purple when outperforming
-        symbol = "▼"
+    if break_even_found:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Break-even Percentile",
+                f"{break_even_pct}th",
+                help="GHHF starts outperforming DHHF from this percentile onwards"
+            )
+        with col2:
+            ghhf_break_even = np.percentile(ghhf_final, break_even_pct)
+            dhhf_break_even = np.percentile(dhhf_final, break_even_pct)
+            st.metric(
+                "Break-even Value",
+                format_currency_compact(ghhf_break_even),
+                help=f"Portfolio value at {break_even_pct}th percentile"
+            )
+        with col3:
+            prob_outperform = 100 - break_even_pct
+            st.metric(
+                "Probability GHHF > DHHF",
+                f"{prob_outperform}%",
+                help=f"Chance that GHHF outperforms DHHF"
+            )
     else:
-        color = '#666666'  # Gray when equal
-        symbol = "●"
-    
-    # Add percentage annotation
-    fig2.add_annotation(
-        x=f"{p}th",
-        y=y_pos,
-        text=f"{symbol} {pct_diff:+.0f}%",
-        showarrow=False,
-        font=dict(
-            size=16,
-            color=color,
-            family="Arial Black"
-        ),
-        bgcolor="rgba(255, 255, 255, 0.95)",
-        bordercolor=color,
-        borderwidth=2,
-        borderpad=6,
-        align="center"
+        st.warning("GHHF does not outperform DHHF at any percentile in this simulation")
+
+    # Ensure break-even percentile is included in the percentiles list if found
+    if break_even_found and break_even_pct not in percentiles:
+        percentiles.append(break_even_pct)
+        percentiles.sort()  # Keep percentiles in ascending order
+
+    #st.subheader("Percentile comparison (grouped bars)")
+    # Grouped bars at selected percentiles
+    vals_ghhf = [np.percentile(ghhf_final, p) for p in percentiles]
+    vals_dhhf = [np.percentile(dhhf_final, p) for p in percentiles]
+
+    # Calculate percentage differences for tooltips
+    pct_diffs = [round(((ghhf_val - dhhf_val) / dhhf_val * 100), 1) for ghhf_val, dhhf_val in zip(vals_ghhf, vals_dhhf)]
+
+    # Create Plotly bar chart
+    fig2 = go.Figure()
+
+    # Add GHHF bars
+    fig2.add_trace(go.Bar(
+        x=[f"{p}th" for p in percentiles],
+        y=vals_ghhf,
+        name="GHHF",
+        marker_color='#2E86AB',
+        hovertemplate="<b>GHHF</b><br>" +
+                     "Percentile: %{x}<br>" +
+                     "Value: %{customdata[0]}<br>" +
+                     "vs DHHF: %{customdata[1]:+.0f}%<br>" +
+                     "<extra></extra>",
+        customdata=[[format_currency_compact(y), pct] for y, pct in zip(vals_ghhf, pct_diffs)]
+    ))
+
+    # Add DHHF bars
+    fig2.add_trace(go.Bar(
+        x=[f"{p}th" for p in percentiles],
+        y=vals_dhhf,
+        name="DHHF",
+        marker_color='#A23B72',
+        hovertemplate="<b>DHHF</b><br>" +
+                     "Percentile: %{x}<br>" +
+                     "Value: %{customdata[0]}<br>" +
+                     "vs GHHF: %{customdata[1]:+.0f}%<br>" +
+                     "<extra></extra>",
+        customdata=[[format_currency_compact(y), -pct] for y, pct in zip(vals_dhhf, pct_diffs)]
+    ))
+
+    # Add ThinkCell-style percentage increase annotations
+    for i, (p, ghhf_val, dhhf_val, pct_diff) in enumerate(zip(percentiles, vals_ghhf, vals_dhhf, pct_diffs)):
+        # Calculate position for annotation (above the higher bar)
+        max_val = max(ghhf_val, dhhf_val)
+        y_pos = max_val + (max_val * 0.08)  # 8% above the higher bar for more spacing
+        
+        # Determine color based on whether GHHF outperforms DHHF
+        if pct_diff > 0:
+            color = '#2E86AB'  # GHHF blue when outperforming
+            symbol = "▲"
+        elif pct_diff < 0:
+            color = '#A23B72'  # DHHF purple when outperforming
+            symbol = "▼"
+        else:
+            color = '#666666'  # Gray when equal
+            symbol = "●"
+        
+        # Add percentage annotation
+        fig2.add_annotation(
+            x=f"{p}th",
+            y=y_pos,
+            text=f"{symbol} {pct_diff:+.0f}%",
+            showarrow=False,
+            font=dict(
+                size=16,
+                color=color,
+                family="Arial Black"
+            ),
+            bgcolor="rgba(255, 255, 255, 0.95)",
+            bordercolor=color,
+            borderwidth=2,
+            borderpad=6,
+            align="center"
+        )
+
+    # Update layout
+    fig2.update_layout(
+        title="GHHF vs DHHF by Monte Carlo Percentile of Outcomes",
+        xaxis_title="Percentile of outcomes",
+        yaxis_title="Terminal value (A$)",
+        barmode='group',
+        height=800,
+        showlegend=True,
+        hovermode='closest'
     )
 
-# Update layout
-fig2.update_layout(
-    title="GHHF vs DHHF by Monte Carlo Percentile of Outcomes",
-    xaxis_title="Percentile of outcomes",
-    yaxis_title="Terminal value (A$)",
-    barmode='group',
-    height=800,
-    showlegend=True,
-    hovermode='closest'
-)
+    # Remove gridlines and format y-axis with compact currency labels
+    fig2.update_xaxes(showgrid=False)
 
-# Remove gridlines and format y-axis with compact currency labels
-fig2.update_xaxes(showgrid=False)
+    # Format y-axis with dynamic scaling based on data range
+    max_val = max(max(vals_ghhf), max(vals_dhhf))
+    min_val = min(min(vals_ghhf), min(vals_dhhf))
+    data_range = max_val - min_val
 
-# Format y-axis with dynamic scaling based on data range
-max_val = max(max(vals_ghhf), max(vals_dhhf))
-min_val = min(min(vals_ghhf), min(vals_dhhf))
-data_range = max_val - min_val
+    if max_val >= 1_000_000:
+        # For millions, use dynamic increments based on data range
+        if data_range >= 10_000_000:
+            increment = 2_000_000  # 2M increments for very large ranges
+        elif data_range >= 5_000_000:
+            increment = 1_000_000  # 1M increments for large ranges
+        else:
+            increment = 500_000    # 500k increments for smaller ranges
+        
+        tickvals = list(np.arange(0, max_val + increment, increment))
+        fig2.update_yaxes(
+            showgrid=False,
+            tickmode='array',
+            tickvals=tickvals,
+            ticktext=[f"${x/1_000_000:.1f}m" for x in tickvals]
+        )
+    elif max_val >= 100_000:
+        # For hundreds of thousands, use dynamic increments
+        if data_range >= 500_000:
+            increment = 200_000  # 200k increments for large ranges
+        elif data_range >= 200_000:
+            increment = 100_000  # 100k increments for medium ranges
+        else:
+            increment = 50_000   # 50k increments for smaller ranges
+        
+        tickvals = list(np.arange(0, max_val + increment, increment))
+        fig2.update_yaxes(
+            showgrid=False,
+            tickmode='array',
+            tickvals=tickvals,
+            ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
+        )
+    elif max_val >= 1_000:
+        # For thousands, use dynamic increments
+        if data_range >= 50_000:
+            increment = 20_000  # 20k increments for large ranges
+        elif data_range >= 20_000:
+            increment = 10_000  # 10k increments for medium ranges
+        else:
+            increment = 5_000   # 5k increments for smaller ranges
+        
+        tickvals = list(np.arange(0, max_val + increment, increment))
+        fig2.update_yaxes(
+            showgrid=False,
+            tickmode='array',
+            tickvals=tickvals,
+            ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
+        )
+    else:
+        # For small values, use standard formatting
+        fig2.update_yaxes(
+            showgrid=False,
+            tickformat=",.0f",
+            tickprefix="$"
+        )
 
-if max_val >= 1_000_000:
-    # For millions, use dynamic increments based on data range
-    if data_range >= 10_000_000:
-        increment = 2_000_000  # 2M increments for very large ranges
-    elif data_range >= 5_000_000:
-        increment = 1_000_000  # 1M increments for large ranges
-    else:
-        increment = 500_000    # 500k increments for smaller ranges
-    
-    tickvals = list(np.arange(0, max_val + increment, increment))
-    fig2.update_yaxes(
-        showgrid=False,
-        tickmode='array',
-        tickvals=tickvals,
-        ticktext=[f"${x/1_000_000:.1f}m" for x in tickvals]
-    )
-elif max_val >= 100_000:
-    # For hundreds of thousands, use dynamic increments
-    if data_range >= 500_000:
-        increment = 200_000  # 200k increments for large ranges
-    elif data_range >= 200_000:
-        increment = 100_000  # 100k increments for medium ranges
-    else:
-        increment = 50_000   # 50k increments for smaller ranges
-    
-    tickvals = list(np.arange(0, max_val + increment, increment))
-    fig2.update_yaxes(
-        showgrid=False,
-        tickmode='array',
-        tickvals=tickvals,
-        ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
-    )
-elif max_val >= 1_000:
-    # For thousands, use dynamic increments
-    if data_range >= 50_000:
-        increment = 20_000  # 20k increments for large ranges
-    elif data_range >= 20_000:
-        increment = 10_000  # 10k increments for medium ranges
-    else:
-        increment = 5_000   # 5k increments for smaller ranges
-    
-    tickvals = list(np.arange(0, max_val + increment, increment))
-    fig2.update_yaxes(
-        showgrid=False,
-        tickmode='array',
-        tickvals=tickvals,
-        ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
+    # Layout with chart on left, text on right
+    col_chart, col_text = st.columns([2, 1])  # wider chart, narrower text
+
+    with col_chart:
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with col_text:
+        st.markdown("### Description")
+        st.markdown(
+            "The chart presents terminal portfolio values from Monte Carlo simulations, "
+            "shown across selected percentiles. Outcomes for the leveraged portfolio (GHHF, in **blue**) "
+            "are displayed alongside the unleveraged portfolio (DHHF, in **purple**). Each bar represents "
+            "the simulated portfolio value at a given percentile, with annotations showing the percentage "
+            "difference between the two strategies. Upward arrows indicate scenarios where leverage outperforms, "
+            "while downward arrows highlight underperformance."
+        )
+
+        st.markdown("### Insights")
+        st.markdown(
+            "When evaluating leveraged portfolios, the average outcome often appears highly attractive. "
+            "However, averages can be misleading because they are disproportionately influenced by the best-performing "
+            "scenarios. A more robust assessment comes from examining the distribution of results across percentiles. "
+            "This reveals that, while leverage amplifies gains in favourable markets, it also magnifies losses and "
+            "increases exposure to *sequence of returns risk*. In practice, there can be extended periods—sometimes "
+            "spanning 20 years or more—where a leveraged portfolio underperforms its unleveraged counterpart. "
+            "The graph highlights this trade-off: leverage offers the potential for higher upside, but also carries a "
+            "significant risk of prolonged underperformance, depending on the timing and path of returns."
+        )
+
+        st.markdown("### Notes")
+        st.markdown(
+            "These results are based on Monte Carlo simulations, which generate outcomes using randomised return "
+            "paths rather than historical sequences. Unlike bootstrap or block-bootstrap approaches, Monte Carlo "
+            "simulations do not assume time-series features such as mean reversion. This makes them more conservative "
+            "at the extreme ends of the distribution, particularly when assessing tail risks and the likelihood of "
+            "extreme outcomes."
+        )
+
+    # Key percentiles table (duplicated)
+    st.subheader("Investment Terminal Values")
+    data = {
+        "Percentile": [f"{p}th" for p in percentiles],
+        "GHHF": [np.percentile(ghhf_final, p) for p in percentiles],
+        "DHHF": [np.percentile(dhhf_final, p) for p in percentiles],
+    }
+    df = pd.DataFrame(data)
+
+    # Calculate percentage differences
+    df["Delta"] = df["GHHF"] - df["DHHF"]
+    df["Delta %"] = ((df["GHHF"] - df["DHHF"]) / df["DHHF"] * 100).round(1)
+
+    # Create display version with formatted currency
+    df_display = df.copy()
+    df_display["GHHF"] = df_display["GHHF"].map(aud)
+    df_display["DHHF"] = df_display["DHHF"].map(aud)
+    df_display["Delta"] = df_display["Delta"].map(aud)
+    df_display["Delta %"] = df_display["Delta %"].map(lambda x: f"{x}%")
+
+    # Apply color styling to the dataframe
+    def color_rows(row):
+        """Color entire rows based on whether GHHF outperforms DHHF, with break-even highlighted in blue"""
+        # Get the Delta % value from the row
+        delta_pct_str = row['Delta %']
+        percentile_str = row['Percentile']
+        
+        # Check if this is the break-even percentile
+        if break_even_found and percentile_str == f"{break_even_pct}th":
+            return ['background-color: #cce5ff; color: #004085'] * len(row)  # Blue for break-even
+        
+        # Apply performance-based coloring
+        if isinstance(delta_pct_str, str) and delta_pct_str.endswith('%'):
+            try:
+                # Extract numeric value from percentage string
+                num_val = float(delta_pct_str.rstrip('%'))
+                if num_val > 0:
+                    return ['background-color: #d4edda; color: #155724'] * len(row)  # Green for positive
+                elif num_val < 0:
+                    return ['background-color: #f8d7da; color: #721c24'] * len(row)  # Red for negative
+                else:
+                    return ['background-color: #e2e3e5; color: #383d41'] * len(row)  # Gray for zero
+            except:
+                return [''] * len(row)
+        return [''] * len(row)
+
+    # Apply styling to entire rows
+    styled_df = df_display.style.apply(color_rows, axis=1)
+
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+    # Notes
+    st.info(
+        """
+        **Notes**
+        - This is a stylised Monte Carlo using geometric Brownian motion with monthly steps.
+        - Fees are applied as a constant drag each month (MER/12).
+        - Assumptions are *yours to set* — this tool doesn't fetch live data. Consider stress-testing a range of returns/volatility/fees.
+        - Using the same random shocks for both series ensures a fair, apples-to-apples comparison under identical market paths.
+        """
     )
 else:
-    # For small values, use standard formatting
-    fig2.update_yaxes(
-        showgrid=False,
-        tickformat=",.0f",
-        tickprefix="$"
-    )
-
-# Layout with chart on left, text on right
-col_chart, col_text = st.columns([2, 1])  # wider chart, narrower text
-
-with col_chart:
-    st.plotly_chart(fig2, use_container_width=True)
-
-with col_text:
-    st.markdown("### Description")
-    st.markdown(
-        "The chart presents terminal portfolio values from Monte Carlo simulations, "
-        "shown across selected percentiles. Outcomes for the leveraged portfolio (GHHF, in **blue**) "
-        "are displayed alongside the unleveraged portfolio (DHHF, in **purple**). Each bar represents "
-        "the simulated portfolio value at a given percentile, with annotations showing the percentage "
-        "difference between the two strategies. Upward arrows indicate scenarios where leverage outperforms, "
-        "while downward arrows highlight underperformance."
-    )
-
-    st.markdown("### Insights")
-    st.markdown(
-        "When evaluating leveraged portfolios, the average outcome often appears highly attractive. "
-        "However, averages can be misleading because they are disproportionately influenced by the best-performing "
-        "scenarios. A more robust assessment comes from examining the distribution of results across percentiles. "
-        "This reveals that, while leverage amplifies gains in favourable markets, it also magnifies losses and "
-        "increases exposure to *sequence of returns risk*. In practice, there can be extended periods—sometimes "
-        "spanning 20 years or more—where a leveraged portfolio underperforms its unleveraged counterpart. "
-        "The graph highlights this trade-off: leverage offers the potential for higher upside, but also carries a "
-        "significant risk of prolonged underperformance, depending on the timing and path of returns."
-    )
-
-    st.markdown("### Notes")
-    st.markdown(
-        "These results are based on Monte Carlo simulations, which generate outcomes using randomised return "
-        "paths rather than historical sequences. Unlike bootstrap or block-bootstrap approaches, Monte Carlo "
-        "simulations do not assume time-series features such as mean reversion. This makes them more conservative "
-        "at the extreme ends of the distribution, particularly when assessing tail risks and the likelihood of "
-        "extreme outcomes."
-    )
-
-# Key percentiles table (duplicated)
-st.subheader("Investment Terminal Values")
-data = {
-    "Percentile": [f"{p}th" for p in percentiles],
-    "GHHF": [np.percentile(ghhf_final, p) for p in percentiles],
-    "DHHF": [np.percentile(dhhf_final, p) for p in percentiles],
-}
-df = pd.DataFrame(data)
-
-# Calculate percentage differences
-df["Delta"] = df["GHHF"] - df["DHHF"]
-df["Delta %"] = ((df["GHHF"] - df["DHHF"]) / df["DHHF"] * 100).round(1)
-
-# Create display version with formatted currency
-df_display = df.copy()
-df_display["GHHF"] = df_display["GHHF"].map(aud)
-df_display["DHHF"] = df_display["DHHF"].map(aud)
-df_display["Delta"] = df_display["Delta"].map(aud)
-df_display["Delta %"] = df_display["Delta %"].map(lambda x: f"{x}%")
-
-# Apply color styling to the dataframe
-def color_rows(row):
-    """Color entire rows based on whether GHHF outperforms DHHF, with break-even highlighted in blue"""
-    # Get the Delta % value from the row
-    delta_pct_str = row['Delta %']
-    percentile_str = row['Percentile']
-    
-    # Check if this is the break-even percentile
-    if break_even_found and percentile_str == f"{break_even_pct}th":
-        return ['background-color: #cce5ff; color: #004085'] * len(row)  # Blue for break-even
-    
-    # Apply performance-based coloring
-    if isinstance(delta_pct_str, str) and delta_pct_str.endswith('%'):
-        try:
-            # Extract numeric value from percentage string
-            num_val = float(delta_pct_str.rstrip('%'))
-            if num_val > 0:
-                return ['background-color: #d4edda; color: #155724'] * len(row)  # Green for positive
-            elif num_val < 0:
-                return ['background-color: #f8d7da; color: #721c24'] * len(row)  # Red for negative
-            else:
-                return ['background-color: #e2e3e5; color: #383d41'] * len(row)  # Gray for zero
-        except:
-            return [''] * len(row)
-    return [''] * len(row)
-
-# Apply styling to entire rows
-styled_df = df_display.style.apply(color_rows, axis=1)
-
-st.dataframe(styled_df, use_container_width=True, hide_index=True)
-
-# Notes
-st.info(
-    """
-    **Notes**
-    - This is a stylised Monte Carlo using geometric Brownian motion with monthly steps.
-    - Fees are applied as a constant drag each month (MER/12).
-    - Assumptions are *yours to set* — this tool doesn't fetch live data. Consider stress-testing a range of returns/volatility/fees.
-    - Using the same random shocks for both series ensures a fair, apples-to-apples comparison under identical market paths.
-    """
-)
+    # Show message when no simulation has been run yet
+    pass
