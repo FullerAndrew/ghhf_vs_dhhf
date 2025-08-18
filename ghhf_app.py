@@ -239,7 +239,7 @@ if break_even_found and break_even_pct not in percentiles:
     percentiles.append(break_even_pct)
     percentiles.sort()  # Keep percentiles in ascending order
 
-st.subheader("Percentile comparison (grouped bars)")
+#st.subheader("Percentile comparison (grouped bars)")
 # Grouped bars at selected percentiles
 vals_ghhf = [np.percentile(ghhf_final, p) for p in percentiles]
 vals_dhhf = [np.percentile(dhhf_final, p) for p in percentiles]
@@ -315,7 +315,7 @@ for i, (p, ghhf_val, dhhf_val, pct_diff) in enumerate(zip(percentiles, vals_ghhf
 
 # Update layout
 fig2.update_layout(
-    title="Terminal Values by Percentile",
+    title="GHHF vs DHHF by Monte Carlo Percentile of Outcomes",
     xaxis_title="Percentile of outcomes",
     yaxis_title="Terminal value (A$)",
     barmode='group',
