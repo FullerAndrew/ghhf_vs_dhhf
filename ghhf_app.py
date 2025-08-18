@@ -327,23 +327,58 @@ fig2.update_layout(
 # Remove gridlines and format y-axis with compact currency labels
 fig2.update_xaxes(showgrid=False)
 
-# Format y-axis with compact currency
+# Format y-axis with dynamic scaling based on data range
 max_val = max(max(vals_ghhf), max(vals_dhhf))
+min_val = min(min(vals_ghhf), min(vals_dhhf))
+data_range = max_val - min_val
+
 if max_val >= 1_000_000:
-    # For millions, divide by 1M and format
+    # For millions, use dynamic increments based on data range
+    if data_range >= 10_000_000:
+        increment = 2_000_000  # 2M increments for very large ranges
+    elif data_range >= 5_000_000:
+        increment = 1_000_000  # 1M increments for large ranges
+    else:
+        increment = 500_000    # 500k increments for smaller ranges
+    
+    tickvals = list(np.arange(0, max_val + increment, increment))
     fig2.update_yaxes(
         showgrid=False,
         tickmode='array',
-        tickvals=[x for x in np.arange(0, max_val + 500000, 500000)],
-        ticktext=[f"${x/1_000_000:.1f}m" for x in np.arange(0, max_val + 500000, 500000)]
+        tickvals=tickvals,
+        ticktext=[f"${x/1_000_000:.1f}m" for x in tickvals]
+    )
+elif max_val >= 100_000:
+    # For hundreds of thousands, use dynamic increments
+    if data_range >= 500_000:
+        increment = 200_000  # 200k increments for large ranges
+    elif data_range >= 200_000:
+        increment = 100_000  # 100k increments for medium ranges
+    else:
+        increment = 50_000   # 50k increments for smaller ranges
+    
+    tickvals = list(np.arange(0, max_val + increment, increment))
+    fig2.update_yaxes(
+        showgrid=False,
+        tickmode='array',
+        tickvals=tickvals,
+        ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
     )
 elif max_val >= 1_000:
-    # For thousands, divide by 1K and format
+    # For thousands, use dynamic increments
+    if data_range >= 50_000:
+        increment = 20_000  # 20k increments for large ranges
+    elif data_range >= 20_000:
+        increment = 10_000  # 10k increments for medium ranges
+    else:
+        increment = 5_000   # 5k increments for smaller ranges
+    
+    tickvals = list(np.arange(0, max_val + increment, increment))
     fig2.update_yaxes(
         showgrid=False,
         tickmode='array',
-        tickvals=[x for x in np.arange(0, max_val + 50000, 50000)],
-        ticktext=[f"${x/1_000:.0f}k" for x in np.arange(0, max_val + 50000, 50000)]
+        tickvals=tickvals,
+        ticktext=[f"${x/1_000:.0f}k" for x in tickvals]
     )
 else:
     # For small values, use standard formatting
@@ -353,10 +388,46 @@ else:
         tickprefix="$"
     )
 
-st.plotly_chart(fig2, use_container_width=True)
+# Layout with chart on left, text on right
+col_chart, col_text = st.columns([2, 1])  # wider chart, narrower text
+
+with col_chart:
+    st.plotly_chart(fig2, use_container_width=True)
+
+with col_text:
+    st.markdown("### Description")
+    st.markdown(
+        "The chart presents terminal portfolio values from Monte Carlo simulations, "
+        "shown across selected percentiles. Outcomes for the leveraged portfolio (GHHF, in **blue**) "
+        "are displayed alongside the unleveraged portfolio (DHHF, in **purple**). Each bar represents "
+        "the simulated portfolio value at a given percentile, with annotations showing the percentage "
+        "difference between the two strategies. Upward arrows indicate scenarios where leverage outperforms, "
+        "while downward arrows highlight underperformance."
+    )
+
+    st.markdown("### Insights")
+    st.markdown(
+        "When evaluating leveraged portfolios, the average outcome often appears highly attractive. "
+        "However, averages can be misleading because they are disproportionately influenced by the best-performing "
+        "scenarios. A more robust assessment comes from examining the distribution of results across percentiles. "
+        "This reveals that, while leverage amplifies gains in favourable markets, it also magnifies losses and "
+        "increases exposure to *sequence of returns risk*. In practice, there can be extended periods—sometimes "
+        "spanning 20 years or more—where a leveraged portfolio underperforms its unleveraged counterpart. "
+        "The graph highlights this trade-off: leverage offers the potential for higher upside, but also carries a "
+        "significant risk of prolonged underperformance, depending on the timing and path of returns."
+    )
+
+    st.markdown("### Notes")
+    st.markdown(
+        "These results are based on Monte Carlo simulations, which generate outcomes using randomised return "
+        "paths rather than historical sequences. Unlike bootstrap or block-bootstrap approaches, Monte Carlo "
+        "simulations do not assume time-series features such as mean reversion. This makes them more conservative "
+        "at the extreme ends of the distribution, particularly when assessing tail risks and the likelihood of "
+        "extreme outcomes."
+    )
 
 # Key percentiles table (duplicated)
-st.subheader("Key percentiles (terminal value) - Duplicate View")
+st.subheader("Investment Terminal Values")
 data = {
     "Percentile": [f"{p}th" for p in percentiles],
     "GHHF": [np.percentile(ghhf_final, p) for p in percentiles],
