@@ -232,8 +232,76 @@ if ghhf_final is not None and dhhf_final is not None:
     if show_real_values:
         st.info(f"💰 **Real Values Displayed**: All results are inflation-adjusted using {inflation_rate*100:.1f}% annual inflation rate. Values shown represent purchasing power in today's dollars.")
 
+    # Add KPI metrics for GHHF and DHHF
+    st.subheader("Portfolio Statistics")
+    
+    # Calculate statistics
+    ghhf_mean = np.mean(ghhf_final)
+    ghhf_median = np.median(ghhf_final)
+    ghhf_std = np.std(ghhf_final)
+    
+    dhhf_mean = np.mean(dhhf_final)
+    dhhf_median = np.median(dhhf_final)
+    dhhf_std = np.std(dhhf_final)
+    
+    # Display in three columns: combined means, combined medians, combined standard deviations
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Mean (GHHF / DHHF)",
+            f"{format_currency_compact(ghhf_mean)} / {format_currency_compact(dhhf_mean)}",
+            help="Average terminal values: GHHF / DHHF"
+        )
+    
+    with col2:
+        st.metric(
+            "Median (GHHF / DHHF)",
+            f"{format_currency_compact(ghhf_median)} / {format_currency_compact(dhhf_median)}",
+            help="Middle values when all outcomes are sorted: GHHF / DHHF"
+        )
+    
+    with col3:
+        st.metric(
+            "Std Dev (GHHF / DHHF)",
+            f"{format_currency_compact(ghhf_std)} / {format_currency_compact(dhhf_std)}",
+            help="Standard deviation of terminal values: GHHF / DHHF"
+        )
+    
+    # Add comparison metrics
+    #st.subheader("Portfolio Comparison")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        mean_diff = ghhf_mean - dhhf_mean
+        mean_diff_pct = (mean_diff / dhhf_mean) * 100
+        st.metric(
+            "Mean Difference (GHHF - DHHF)",
+            format_currency_compact(mean_diff),
+            f"{mean_diff_pct:+.1f}%",
+            help="Difference in average outcomes between strategies"
+        )
+    
+    with col2:
+        median_diff = ghhf_median - dhhf_median
+        median_diff_pct = (median_diff / dhhf_median) * 100
+        st.metric(
+            "Median Difference (GHHF - DHHF)",
+            format_currency_compact(median_diff),
+            f"{median_diff_pct:+.1f}%",
+            help="Difference in median outcomes between strategies"
+        )
+    
+    with col3:
+        vol_ratio = ghhf_std / dhhf_std
+        st.metric(
+            "Volatility Ratio (GHHF/DHHF)",
+            f"{vol_ratio:.2f}x",
+            help="How much more volatile GHHF is compared to DHHF"
+        )
+
     # Break-even percentile KPI
-    st.subheader("Break-even Analysis")
+    #st.subheader("Break-even Analysis")
 
     # Find break-even percentile (where GHHF = DHHF)
     break_even_found = False
