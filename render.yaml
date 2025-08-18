@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ghhf-vs-dhhf
+    env: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run ghhf_app.py --server.port $PORT --server.address 0.0.0.0
+    autoDeploy: true
+    healthCheckPath: /
