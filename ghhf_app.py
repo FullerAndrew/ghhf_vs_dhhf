@@ -534,6 +534,285 @@ if ghhf_final is not None and dhhf_final is not None:
             "extreme outcomes."
         )
 
+    # Add month-to-month pathway chart
+    st.subheader("Portfolio Evolution Over Time")
+    
+    # Add toggle for view type
+    col_toggle, col_percentile = st.columns([1, 1])
+    with col_toggle:
+        view_type = st.radio(
+            "Chart View:",
+            ["GHHF all percentiles", "GHHF vs DHHF Comparison"],
+            horizontal=True
+        )
+    
+    with col_percentile:
+        if view_type == "GHHF vs DHHF Comparison":
+            selected_percentile = st.selectbox(
+                "Select Percentile to Compare:",
+                percentiles,
+                format_func=lambda x: f"{x}th percentile"
+            )
+        else:
+            selected_percentile = None
+    
+    # Function to calculate month-to-month pathways for each decile
+    def calculate_pathways_for_percentiles(percentiles_list, years, sims, start_value, monthly_contrib, seed, include_dhhf=False):
+        """Calculate month-to-month pathways for specific percentiles"""
+        months = years * 12
+        
+        # Use the same random seed for consistency
+        rng = np.random.default_rng(seed)
+        shocks = rng.normal(0.0, 1.0, size=(sims, months))
+        
+        def simulate_pathway_with_shocks(mu_annual, sigma_annual, fee_annual):
+            drift = (mu_annual - 0.5 * sigma_annual**2) / 12.0
+            vol = sigma_annual / np.sqrt(12.0)
+            gross_returns = np.exp(drift + vol * shocks)
+            fee_factor = (1.0 - fee_annual / 12.0)
+            
+            # Calculate wealth at each month for all simulations
+            wealth_paths = np.zeros((sims, months))
+            wealth = np.full(sims, start_value, dtype=float)
+            
+            for m in range(months):
+                wealth += monthly_contrib
+                wealth *= gross_returns[:, m]
+                wealth *= fee_factor
+                wealth_paths[:, m] = wealth
+            
+            return wealth_paths
+        
+        # Get pathways for GHHF
+        ghhf_paths = simulate_pathway_with_shocks(params_ghhf["mu"], params_ghhf["sigma"], params_ghhf["fee"])
+        
+        # Get pathways for DHHF if comparison is requested
+        dhhf_paths = None
+        if include_dhhf:
+            dhhf_paths = simulate_pathway_with_shocks(params_dhhf["mu"], params_dhhf["sigma"], params_dhhf["fee"])
+        
+        # Calculate average pathway for each percentile
+        pathways = {}
+        for p in percentiles_list:
+            # Find the value at this percentile for each month
+            ghhf_percentile_path = []
+            dhhf_percentile_path = []
+            
+            for m in range(months):
+                ghhf_percentile_path.append(np.percentile(ghhf_paths[:, m], p))
+                if include_dhhf:
+                    dhhf_percentile_path.append(np.percentile(dhhf_paths[:, m], p))
+            
+            pathways[f"{p}th"] = {
+                'ghhf': ghhf_percentile_path
+            }
+            if include_dhhf:
+                pathways[f"{p}th"]['dhhf'] = dhhf_percentile_path
+        
+        return pathways, months
+    
+    # Calculate pathways based on view type
+    if view_type == "GHHF vs DHHF Comparison":
+        # For comparison view, only calculate the selected percentile
+        pathways, months = calculate_pathways_for_percentiles([selected_percentile], years, sims, start_value, monthly_contrib, seed, include_dhhf=True)
+    else:
+        # For GHHF-only view, calculate all percentiles
+        pathways, months = calculate_pathways_for_percentiles(percentiles, years, sims, start_value, monthly_contrib, seed, include_dhhf=False)
+    
+    # Focus on first 5 years for better visibility of sequence risk
+    focus_months = min(60, months)  # Show first 5 years (60 months) or all if less
+    month_labels = [f"Month 0"] + [f"Year {m//12 + 1}, Month {m%12 + 1}" for m in range(focus_months)]
+    
+    # Create the pathway chart
+    fig_pathways = go.Figure()
+    
+    # Add lines for each percentile based on view type
+    if view_type == "GHHF vs DHHF Comparison":
+        # Comparison view: show GHHF vs DHHF for selected percentile
+        percentile_label = f"{selected_percentile}th"
+        pathway_data = pathways[percentile_label]
+        
+        # Add GHHF line (solid)
+        ghhf_values = [start_value] + pathway_data['ghhf'][:focus_months]
+        fig_pathways.add_trace(go.Scatter(
+            x=month_labels,
+            y=ghhf_values,
+            mode='lines',
+            name=f"GHHF {percentile_label}",
+            line=dict(color='#2E86AB', width=3),
+            hovertemplate=f"<b>GHHF {percentile_label}</b><br>" +
+                         "Month: %{x}<br>" +
+                         "Value: %{y:,.0f}<br>" +
+                         "<extra></extra>"
+        ))
+        
+        # Add DHHF line (dashed)
+        dhhf_values = [start_value] + pathway_data['dhhf'][:focus_months]
+        fig_pathways.add_trace(go.Scatter(
+            x=month_labels,
+            y=dhhf_values,
+            mode='lines',
+            name=f"DHHF {percentile_label}",
+            line=dict(color='#A23B72', width=3, dash='dash'),
+            hovertemplate=f"<b>DHHF {percentile_label}</b><br>" +
+                         "Month: %{x}<br>" +
+                         "Value: %{y:,.0f}<br>" +
+                         "<extra></extra>"
+        ))
+        
+        chart_title = f"GHHF vs DHHF Comparison: {percentile_label} Percentile - Sequence of Returns Risk"
+        
+    else:
+        # GHHF-only view: show all percentiles
+        colors_ghhf = ['#2E86AB', '#5DA9E9', '#8BC34A', '#FFC107', '#FF9800', '#F44336', '#9C27B0', '#673AB7', '#3F51B5']
+        
+        for i, (percentile_label, pathway_data) in enumerate(pathways.items()):
+            color_idx = i % len(colors_ghhf)
+            
+            # Add GHHF line for focused time period, starting with month 0
+            ghhf_values = [start_value] + pathway_data['ghhf'][:focus_months]
+            
+            fig_pathways.add_trace(go.Scatter(
+                x=month_labels,
+                y=ghhf_values,
+                mode='lines',
+                name=f"GHHF {percentile_label}",
+                line=dict(color=colors_ghhf[color_idx], width=2),
+                hovertemplate=f"<b>GHHF {percentile_label}</b><br>" +
+                             "Month: %{x}<br>" +
+                             "Value: %{y:,.0f}<br>" +
+                             "<extra></extra>"
+            ))
+        
+        chart_title = "GHHF Portfolio Evolution: Early Years Focus - Sequence of Returns Risk"
+    
+    # Update layout
+    fig_pathways.update_layout(
+        title=chart_title,
+        xaxis_title="Time Period (First 5 Years)",
+        yaxis_title="Portfolio Value (A$) - Log Scale",
+        height=600,
+        showlegend=True,
+        hovermode='closest',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    # Add annotations to highlight sequence of returns risk (only for GHHF-only view)
+    if view_type != "GHHF vs DHHF Comparison" and focus_months >= 12:
+        # Find the 1st and 50th percentile values at year 1
+        year1_1st = pathways["1th"]['ghhf'][11] if "1th" in pathways else None
+        year1_50th = pathways["50th"]['ghhf'][11] if "50th" in pathways else None
+        
+        if year1_1st and year1_50th:
+            # Add annotation showing the gap at year 1
+            fig_pathways.add_annotation(
+                x="Year 1, Month 12",
+                y=year1_50th,
+                text=f"Year 1 Gap: {((year1_50th - year1_1st) / year1_1st * 100):.0f}%",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1,
+                arrowwidth=2,
+                arrowcolor="red",
+                font=dict(size=12, color="red"),
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="red",
+                borderwidth=1
+            )
+    
+    # Format x-axis to show monthly labels for first year, then yearly
+    if focus_months >= 12:
+        # Show monthly labels for first year, then yearly
+        tickvals = []
+        ticktext = []
+        
+        # Month 0
+        tickvals.append("Month 0")
+        ticktext.append("Month 0")
+        
+        # First year: monthly
+        for m in range(12):
+            tickvals.append(month_labels[m+1])  # +1 because month 0 is now at index 0
+            ticktext.append(f"Month {m+1}")
+        
+        # Subsequent years: yearly
+        for m in range(12, focus_months, 12):
+            tickvals.append(month_labels[m+1])  # +1 because month 0 is now at index 0
+            ticktext.append(f"Year {m//12 + 1}")
+        
+        fig_pathways.update_xaxes(
+            showgrid=False,
+            tickangle=45,
+            tickmode='array',
+            tickvals=tickvals,
+            ticktext=ticktext
+        )
+    else:
+        # If less than 1 year, show all months including month 0
+        fig_pathways.update_xaxes(
+            showgrid=False,
+            tickangle=45
+        )
+    
+    # Set y-axis to log scale but with better range for early years
+    fig_pathways.update_yaxes(
+        type="log",
+        showgrid=False,
+        tickformat=",.0f",
+        tickprefix="$"
+    )
+    
+    # Add a horizontal line at the starting investment value
+    fig_pathways.add_hline(
+        y=start_value,
+        line_dash="dash",
+        line_color="gray",
+        line_width=1,
+        opacity=0.5
+    )
+    
+    # Display the pathway chart
+    # Layout with chart on left, text on right
+    col_chart, col_text = st.columns([2, 1])  # wider chart, narrower text
+    
+    with col_chart:
+        st.plotly_chart(fig_pathways, use_container_width=True)
+    
+    with col_text:
+        st.markdown("### Chart Explanation")
+        if view_type == "GHHF vs DHHF Comparison":
+            st.markdown(
+                f"This chart compares the portfolio evolution of GHHF (leveraged) and DHHF (unleveraged) strategies "
+                f"at the {selected_percentile}th percentile of outcomes. Each line represents the average portfolio "
+                f"value at each month across 20,000 simulations that end up at this specific percentile."
+            )
+        else:
+            st.markdown(
+                "This chart shows how GHHF portfolio values evolve over time for different percentiles of outcomes. "
+                "Each line represents the average portfolio value at each month across 20,000 simulations that end up "
+                "at a specific percentile."
+            )
+        
+        st.markdown("### Key Results")
+        st.markdown(
+            "**Sequence of Returns Risk**: Early declines in portfolio value create gaps that cannot be recovered "
+            "in leveraged portfolios. The log scale reveals how small early setbacks compound into large long-term "
+            "differences, demonstrating why poor first-year performance is so detrimental to leveraged strategies."
+        )
+        
+        st.markdown("### Why This Matters")
+        st.markdown(
+            "In leveraged portfolios, poor early performance not only reduces the base investment amount but also "
+            "diminishes the leverage multiplier effect. This creates a compounding penalty that makes it increasingly "
+            "difficult to catch up over time, even with subsequent strong performance."
+        )
+
     # Key percentiles table (duplicated)
     st.subheader("Investment Terminal Values")
     data = {
